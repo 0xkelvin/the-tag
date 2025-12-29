@@ -1,4 +1,6 @@
 # the-tag
+<img width="679" height="653" alt="image" src="https://github.com/user-attachments/assets/c280b38f-db3c-409a-aaa3-c54f0d905b22" />
+
 
 # Components: 
 - [Seeed Studio XIAO nRF54L15 Sense](https://www.seeedstudio.com/Seeed-Studio-XIAO-nRF54L15-Sense-Pre-Soldered-p-6500.html?srsltid=AfmBOoqPTqsxPYSpyJ1X8-ABDJ6ZhmzmzD8qlfOUBaC0Au0bjOC8lFFK)
