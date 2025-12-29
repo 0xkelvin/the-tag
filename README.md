@@ -9,5 +9,10 @@
 - Or [E-ink 1,54 inch from proe 4 colors](https://www.proe.vn/1-64inch-square-e-paper-g-raw-display-168-168-red-yellow-black-white)  
 
 
+# Hardware Connection for Developer version:
+<img width="543" height="164" alt="image" src="https://github.com/user-attachments/assets/2be2b3ba-df4d-4b64-a039-8cb74c12c2f6" />
+
+
+
 # Share Folder 
 - [Google Driver project folder](https://drive.google.com/drive/folders/1gwg72AfddP2lZDSd2DLhJ3Zl0bu9NLsG?usp=drive_link)
