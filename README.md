@@ -11,7 +11,7 @@
 
 # Hardware Connection for Developer version:
 <img width="543" height="164" alt="image" src="https://github.com/user-attachments/assets/2be2b3ba-df4d-4b64-a039-8cb74c12c2f6" />
-
+<img width="699" height="291" alt="image" src="https://github.com/user-attachments/assets/857440ce-5541-45d5-8d43-4ffeb70f7e5b" />
 
 
 # Share Folder 
