@@ -1,10 +1,14 @@
 #include <string.h>
 #include <zephyr/device.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/mipi_dbi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/util.h>
 
 #define EPD_NODE DT_NODELABEL(e_paper)
 #define EPD_WIDTH DT_PROP(EPD_NODE, width)
@@ -148,6 +152,30 @@ static void epd_fill_pattern(uint8_t *black_buf, uint8_t *color_buf,
 	}
 }
 
+static void ble_start_advertising(void)
+{
+	static const uint8_t adv_flags = BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR;
+	static const struct bt_data ad[] = {
+		BT_DATA(BT_DATA_FLAGS, &adv_flags, sizeof(adv_flags)),
+	};
+	static const struct bt_data sd[] = {
+		BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME,
+			(sizeof(CONFIG_BT_DEVICE_NAME) - 1U)),
+	};
+	int err;
+
+	err = bt_enable(NULL);
+	if (err < 0) {
+		printk("BLE enable failed: %d\n", err);
+		return;
+	}
+
+	err = bt_le_adv_start(BT_LE_ADV_NCONN, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err < 0) {
+		printk("BLE adv start failed: %d\n", err);
+	}
+}
+
 int main(void)
 {
 	const struct device *epd = DEVICE_DT_GET(EPD_NODE);
@@ -163,17 +191,20 @@ int main(void)
 	static uint8_t color_buf[EPD_BUF_SIZE];
 
 	if (!device_is_ready(epd) || !device_is_ready(dbi_dev)) {
-		return 0;
+		printk("Display devices not ready\n");
+		goto start_ble;
 	}
 
 	if (!gpio_is_ready_dt(&epd_busy)) {
-		return 0;
+		printk("EPD busy GPIO not ready\n");
+		goto start_ble;
 	}
 
 	display_get_capabilities(epd, &caps);
 	if ((caps.screen_info & SCREEN_INFO_MONO_VTILED) == 0U ||
 	    caps.x_resolution < EPD_WIDTH || caps.y_resolution < EPD_HEIGHT) {
-		return 0;
+		printk("Display caps not supported\n");
+		goto start_ble;
 	}
 
 	display_set_pixel_format(epd, PIXEL_FORMAT_MONO10);
@@ -184,16 +215,42 @@ int main(void)
 
 	display_blanking_on(epd);
 	if (display_write(epd, 0, 0, &desc, black_buf) < 0) {
-		return 0;
+		printk("Display write failed\n");
+		goto start_ble;
 	}
 
 	epd_busy_wait();
 	if (epd_write_red_ram(dbi_dev, color_buf, EPD_WIDTH, EPD_HEIGHT) < 0) {
-		return 0;
+		printk("Red RAM write failed\n");
+		goto start_ble;
 	}
 
 	if (display_blanking_off(epd) < 0) {
-		return 0;
+		printk("Display refresh failed\n");
+		goto start_ble;
 	}
-	return 0;
+
+start_ble:
+	ble_start_advertising();
+
+#if DT_NODE_HAS_STATUS(DT_ALIAS(led0), okay)
+	const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+
+	if (!gpio_is_ready_dt(&led)) {
+		printk("LED not ready\n");
+		goto done;
+	}
+
+	gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
+
+	while (1) {
+		gpio_pin_toggle_dt(&led);
+		k_msleep(500);
+	}
+#endif
+
+done:
+	while (1) {
+		k_msleep(1000);
+	}
 }
