@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+
+identifier: the_tag/nrf54l15/cpuapp
+name: the-tag-nRF54L15-Application
+type: mcu
+arch: arm
+toolchain:
+  - gnuarmemb
+  - zephyr
+sysbuild: true
+ram: 188
+flash: 324
+supported:
+  - adc
+  - counter
+  - dmic
+  - gpio
+  - i2c
+  - pwm
+  - retained_mem
+  - spi
+  - watchdog
+  - i2s
