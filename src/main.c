@@ -4,247 +4,291 @@
  */
 
 #include <zephyr/device.h>
-#include <zephyr/drivers/display.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/drivers/mipi_dbi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <string.h>
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
-#define EPD_node DT_NODELABEL(e_paper)
-
-/* JD79661 Commands (Derived from common e-paper drivers) */
-#define JD79661_CMD_PSR 0x00  // Panel Setting
-#define JD79661_CMD_PWR 0x01  // Power Setting
-#define JD79661_CMD_POF 0x02  // Power OFF
-#define JD79661_CMD_PFS 0x03  // Power Off Sequence Setting
-#define JD79661_CMD_PON 0x04  // Power ON
-#define JD79661_CMD_BTST 0x06 // Booster Soft Start
-#define JD79661_CMD_DSLP 0x07 // Deep Sleep
-#define JD79661_CMD_DTM1 0x10 // Data Start Transmission 1
-#define JD79661_CMD_DSP 0x11  // Data Stop
-#define JD79661_CMD_DRF 0x12  // Display Refresh
-#define JD79661_CMD_IPC 0x13  // Image Process Command
-#define JD79661_CMD_PLL 0x30  // PLL Control
-#define JD79661_CMD_TSC 0x40  // Temperature Sensor Command
-#define JD79661_CMD_TSE 0x41  // Temperature Sensor Extension
-#define JD79661_CMD_TSR 0x43  // Temperature Sensor Write
-#define JD79661_CMD_CDI 0x50  // VCOM and Data Interval Setting
-#define JD79661_CMD_LPD 0x51  // Low Power Detection
-#define JD79661_CMD_EUS 0x52  // End Option Setting
-#define JD79661_CMD_TCON 0x60 // TCON Setting
-#define JD79661_CMD_TRES 0x61 // Resolution Setting
-#define JD79661_CMD_REV 0x70  // Revision
-
 /* Display Resolution */
-#define EPD_WIDTH 200
-#define EPD_HEIGHT 200
+#define EPD_WIDTH 152
+#define EPD_HEIGHT 152
+#define BUFFER_SIZE (EPD_WIDTH * EPD_HEIGHT / 4)  // 5776 bytes
 
-static const struct gpio_dt_spec busy_gpio =
-    GPIO_DT_SPEC_GET_BY_IDX(EPD_node, busy_gpios, 0);
-static const struct mipi_dbi_config dbi_config =
-    MIPI_DBI_CONFIG_DT(EPD_node, SPI_OP_MODE_MASTER | SPI_WORD_SET(8), 0);
+/* GPIO pins */
+#define DC_NODE    DT_NODELABEL(gpio1)
+#define RESET_NODE DT_NODELABEL(gpio1)
+#define BUSY_NODE  DT_NODELABEL(gpio1)
+#define CS_NODE    DT_NODELABEL(gpio1)
 
-/* Helper wrapper to send commands using the MIPI DBI API */
-static int jd79661_write_cmd(const struct device *dev, uint8_t cmd,
-                             const uint8_t *data, size_t len) {
-  return mipi_dbi_command_write(dev, &dbi_config, cmd, data, len);
-}
+#define DC_PIN     7   // P1.07 (D3)
+#define RESET_PIN  4   // P1.04 (D0)
+#define BUSY_PIN   11  // P1.11 (D5)
+#define CS_PIN     5   // P1.05 (D1)
 
-static void epd_wait_busy(void) {
-  int cnt = 0;
-  /* Wait for BUSY to go LOW (Ready) or HIGH (Busy) - Depends on controller.
-   * Providing standard check: High = Busy usually for SSD16xx/JD7966x
-   */
-  LOG_INF("Waiting for busy...");
-  while (gpio_pin_get_dt(&busy_gpio) == 1) {
-    k_msleep(10);
-    cnt++;
-    if (cnt > 2000) { // 20s timeout
-      LOG_ERR("Busy timeout!");
-      break;
-    }
-  }
-  LOG_INF("Busy released");
-}
-
-static void epd_reset(const struct device *dev) {
-  mipi_dbi_reset(dev, 20);
-  k_msleep(20);
-}
-
-static int jd79661_init(const struct device *dev) {
-  LOG_INF("Initializing JD79661...");
-
-  epd_reset(dev);
-  epd_wait_busy();
-
-  /* Initialization Sequence (Matched to GDEY029F52 Example) */
-
-  uint8_t cmd_4d[] = {0x78};
-  jd79661_write_cmd(dev, 0x4D, cmd_4d, sizeof(cmd_4d));
-
-  // 1. Panel Setting (PSR)
-  uint8_t psr[] = {0x0f, 0x29};
-  jd79661_write_cmd(dev, JD79661_CMD_PSR, psr, sizeof(psr));
-
-  // 2. Power Setting (PWR)
-  uint8_t pwr[] = {0x07, 0x00};
-  jd79661_write_cmd(dev, JD79661_CMD_PWR, pwr, sizeof(pwr));
-
-  // 3. Power Off Sequence (POFS)
-  uint8_t pofs[] = {0x10, 0x54, 0x44};
-  jd79661_write_cmd(dev, JD79661_CMD_PFS, pofs, sizeof(pofs));
-
-  // 4. Booster Soft Start (BTST)
-  uint8_t btst[] = {0x0f, 0x0a, 0x2f, 0x25, 0x22, 0x2e, 0x21};
-  jd79661_write_cmd(dev, JD79661_CMD_BTST, btst, sizeof(btst));
-
-  // Temperature Sensor (TSE)
-  uint8_t tse[] = {0x00};
-  jd79661_write_cmd(dev, JD79661_CMD_TSE, tse, sizeof(tse));
-
-  // 5. VCOM and Data Interval Setting (CDI)
-  uint8_t cdi[] = {0x37};
-  jd79661_write_cmd(dev, JD79661_CMD_CDI, cdi, sizeof(cdi));
-
-  // 6. TCON Setting
-  uint8_t tcon[] = {0x02, 0x02};
-  jd79661_write_cmd(dev, JD79661_CMD_TCON, tcon, sizeof(tcon));
-
-  // 7. Resolution Setting
-  uint8_t tres[] = {EPD_WIDTH / 256, EPD_WIDTH % 256, EPD_HEIGHT / 256,
-                    EPD_HEIGHT % 256};
-  jd79661_write_cmd(dev, JD79661_CMD_TRES, tres, sizeof(tres));
-
-  // GSST
-  uint8_t gsst[] = {0x00, 0x00, 0x00, 0x00};
-  jd79661_write_cmd(dev, 0x65, gsst, sizeof(gsst));
-
-  // 8. Other Vendor Specific Commands
-  uint8_t cmd_e7[] = {0x1c};
-  jd79661_write_cmd(dev, 0xe7, cmd_e7, sizeof(cmd_e7));
-  uint8_t cmd_e3[] = {0x22};
-  jd79661_write_cmd(dev, 0xe3, cmd_e3, sizeof(cmd_e3));
-  uint8_t cmd_b4[] = {0xd0};
-  jd79661_write_cmd(dev, 0xb4, cmd_b4, sizeof(cmd_b4));
-  uint8_t cmd_b5[] = {0x03};
-  jd79661_write_cmd(dev, 0xb5, cmd_b5, sizeof(cmd_b5));
-  uint8_t cmd_e9[] = {0x01};
-  jd79661_write_cmd(dev, 0xe9, cmd_e9, sizeof(cmd_e9));
-
-  // 9. PLL Control
-  uint8_t pll[] = {0x08};
-  jd79661_write_cmd(dev, JD79661_CMD_PLL, pll, sizeof(pll));
-
-  // 10. Power ON
-  jd79661_write_cmd(dev, JD79661_CMD_PON, NULL, 0);
-  epd_wait_busy();
-
-  LOG_INF("JD79661 Initialized");
-  return 0;
-}
-
-static void jd79661_display_frame(const struct device *dev,
-                                  const uint8_t *buffer, size_t size) {
-  LOG_INF("Sending framebuffer...");
-
-  // Start Data Transmission
-  jd79661_write_cmd(dev, JD79661_CMD_DTM1, buffer, size);
-
-  LOG_INF("Refreshing display...");
-  // Display Refresh
-  jd79661_write_cmd(dev, JD79661_CMD_DRF, NULL, 0);
-  epd_wait_busy();
-
-  LOG_INF("Display update complete");
-}
-
-static void jd79661_deep_sleep(const struct device *dev) {
-  uint8_t dslp[] = {0xa5};
-  jd79661_write_cmd(dev, JD79661_CMD_POF, NULL, 0); // Power OFF
-  epd_wait_busy();
-  jd79661_write_cmd(dev, JD79661_CMD_DSLP, dslp, sizeof(dslp)); // Deep Sleep
-}
-
-/* LED Support */
+/* LED */
 #define LED0_NODE DT_ALIAS(led0)
-static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
-/* Buffer for 200x200 4-color display (2 bits per pixel usually, packed)
- * But standard SPI EPDs often take 1 byte per 2 pixels or strange formats.
- * For JD79661 (4-color), it might be similar to SSD1681 where different buffers
- * are used or packed. Assuming simpler case: Init pattern.
- */
-#define BUFFER_SIZE                                                            \
-  (EPD_WIDTH * EPD_HEIGHT /                                                    \
-   2) // 2 pixels per byte? Or 1 bit per pixel * planes?
-// Let's create a pattern buffer.
+static struct gpio_dt_spec dc_gpio;
+static struct gpio_dt_spec reset_gpio;
+static struct gpio_dt_spec busy_gpio;
+static struct gpio_dt_spec cs_gpio;
+static struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+
+static const struct device *spi_dev;
+static struct spi_config spi_cfg;
+
 static uint8_t frame_buffer[BUFFER_SIZE];
 
-int main(void) {
-  int ret;
-  const struct device *mipi_dev;
+/* Helper functions */
+static void jd79661_write_cmd(uint8_t cmd)
+{
+    struct spi_buf tx_buf = {.buf = &cmd, .len = 1};
+    struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
+    
+    gpio_pin_set_dt(&cs_gpio, 1);  // CS active (low)
+    gpio_pin_set_dt(&dc_gpio, 0);  // Command mode
+    spi_write(spi_dev, &spi_cfg, &tx_bufs);
+    gpio_pin_set_dt(&cs_gpio, 0);  // CS inactive (high)
+}
 
-  LOG_INF("Starting JD79661 Manual Driver Example");
+static void jd79661_write_data(uint8_t data)
+{
+    struct spi_buf tx_buf = {.buf = &data, .len = 1};
+    struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
+    
+    gpio_pin_set_dt(&cs_gpio, 1);  // CS active (low)
+    gpio_pin_set_dt(&dc_gpio, 1);  // Data mode
+    spi_write(spi_dev, &spi_cfg, &tx_bufs);
+    gpio_pin_set_dt(&cs_gpio, 0);  // CS inactive (high)
+}
 
-  /* LED Init */
-  if (!gpio_is_ready_dt(&led)) {
-    LOG_ERR("LED GPIO not ready");
-    return -ENODEV;
-  }
-  gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
+static void jd79661_write_data_bulk(const uint8_t *data, size_t len)
+{
+    gpio_pin_set_dt(&cs_gpio, 1);  // CS active (low)
+    gpio_pin_set_dt(&dc_gpio, 1);  // Data mode
+    
+    // Write in chunks
+    const size_t chunk_size = 256;
+    for (size_t i = 0; i < len; i += chunk_size) {
+        size_t remaining = len - i;
+        size_t write_len = (remaining < chunk_size) ? remaining : chunk_size;
+        
+        struct spi_buf tx_buf = {.buf = (void *)(data + i), .len = write_len};
+        struct spi_buf_set tx_bufs = {.buffers = &tx_buf, .count = 1};
+        spi_write(spi_dev, &spi_cfg, &tx_bufs);
+    }
+    
+    gpio_pin_set_dt(&cs_gpio, 0);  // CS inactive (high)
+}
 
-  /* MIPI DBI Device Init */
-  // We use the parent mipi-dbi-spi device node to get the bus controller
-  // But we need the specific device instance.
-  // Since we defined `e_paper` as child of `mipi_dbi_epaper`,
-  // `DEVICE_DT_GET(DT_NODELABEL(mipi_dbi_epaper))` gives the MIPI DBI
-  // controller instance? Actually, in Zephyr `zephyr,mipi-dbi-spi` acts as the
-  // controller. We need to pass that device to `mipi_dbi_command_write`.
+static void jd79661_wait_busy(void)
+{
+    int cnt = 0;
+    /* BUSY=0 means busy, BUSY=1 means idle */
+    LOG_INF("Waiting for busy (initial: %d)...", gpio_pin_get_dt(&busy_gpio));
+    while (gpio_pin_get_dt(&busy_gpio) == 0) {
+        k_msleep(10);
+        cnt++;
+        if (cnt > 500) { // 5s timeout
+            LOG_ERR("Busy timeout!");
+            break;
+        }
+    }
+    LOG_INF("Busy released");
+}
 
-  mipi_dev = DEVICE_DT_GET(DT_NODELABEL(mipi_dbi_epaper));
-  if (!device_is_ready(mipi_dev)) {
-    LOG_ERR("MIPI DBI device not ready");
-    return -ENODEV;
-  }
+static void jd79661_reset(void)
+{
+    k_msleep(20);
+    gpio_pin_set_dt(&reset_gpio, 0);  // Reset low
+    k_msleep(40);
+    gpio_pin_set_dt(&reset_gpio, 1);  // Reset high
+    k_msleep(50);
+}
 
-  /* BUSY GPIO Init */
-  if (!gpio_is_ready_dt(&busy_gpio)) {
-    LOG_ERR("BUSY GPIO not ready");
-    return -ENODEV;
-  }
-  gpio_pin_configure_dt(&busy_gpio, GPIO_INPUT);
+static int jd79661_init(void)
+{
+    LOG_INF("Initializing JD79661...");
+    
+    jd79661_reset();
+    jd79661_wait_busy();
+    
+    // Initialization sequence from STM32 sample code
+    jd79661_write_cmd(0x4D);
+    jd79661_write_data(0x78);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x00);  // PSR
+    jd79661_write_data(0x0F);
+    jd79661_write_data(0x29);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x01);  // PWRR
+    jd79661_write_data(0x07);
+    jd79661_write_data(0x00);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x03);  // POFS
+    jd79661_write_data(0x10);
+    jd79661_write_data(0x54);
+    jd79661_write_data(0x44);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x06);  // BTST_P
+    jd79661_write_data(0x05);
+    jd79661_write_data(0x00);
+    jd79661_write_data(0x3F);
+    jd79661_write_data(0x0A);
+    jd79661_write_data(0x25);
+    jd79661_write_data(0x12);
+    jd79661_write_data(0x1A);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x50);  // CDI
+    jd79661_write_data(0x37);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x60);  // TCON
+    jd79661_write_data(0x02);
+    jd79661_write_data(0x02);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x61);  // TRES
+    jd79661_write_data(EPD_WIDTH / 256);
+    jd79661_write_data(EPD_WIDTH % 256);
+    jd79661_write_data(EPD_HEIGHT / 256);
+    jd79661_write_data(EPD_HEIGHT % 256);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0xE7);
+    jd79661_write_data(0x1C);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0xE3);
+    jd79661_write_data(0x22);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0xB4);
+    jd79661_write_data(0xD0);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0xB5);
+    jd79661_write_data(0x03);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0xE9);
+    jd79661_write_data(0x01);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x30);
+    jd79661_write_data(0x08);
+    k_usleep(100);
+    
+    jd79661_write_cmd(0x04);  // Power on
+    jd79661_wait_busy();
+    
+    LOG_INF("JD79661 initialized");
+    return 0;
+}
 
-  /* Initialize Display */
-  ret = jd79661_init(mipi_dev);
-  if (ret < 0) {
-    LOG_ERR("Failed to init display");
-    return ret;
-  }
+static void jd79661_display_frame(const uint8_t *buffer, size_t size)
+{
+    LOG_INF("Sending framebuffer (%d bytes)...", size);
+    
+    jd79661_write_cmd(0x10);  // Write data
+    jd79661_write_data_bulk(buffer, size);
+    
+    LOG_INF("Refreshing display...");
+    jd79661_write_cmd(0x12);  // Display refresh
+    jd79661_write_data(0x00);
+    jd79661_wait_busy();
+    
+    LOG_INF("Display update complete");
+}
 
-  /* Fill buffer with solid Yellow */
-  /* For JD79661 (2 bits per pixel):
-   * 0x00 = Black (00 00 00 00)
-   * 0x55 = White (01 01 01 01)
-   * 0xAA = Yellow (10 10 10 10)
-   * 0xFF = Red (11 11 11 11)
-   */
-  for (int i = 0; i < BUFFER_SIZE; i++) {
-    frame_buffer[i] = 0xAA; // Solid Yellow
-  }
-
-  while (1) {
-    gpio_pin_toggle_dt(&led);
-
-    LOG_INF("Updating display...");
-    jd79661_display_frame(mipi_dev, frame_buffer, sizeof(frame_buffer));
-
-    // Wait before next update
-    k_sleep(K_SECONDS(30));
-
-    // Re-init if deep sleep was used (not currently enabled to keep loop
-    // simple)
-  }
+int main(void)
+{
+    int ret;
+    
+    LOG_INF("=== JD79661 E-Paper Test ===");
+    
+    /* LED Init */
+    if (!gpio_is_ready_dt(&led)) {
+        LOG_ERR("LED GPIO not ready");
+        return -ENODEV;
+    }
+    gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
+    
+    /* SPI Init */
+    spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi00));
+    if (!device_is_ready(spi_dev)) {
+        LOG_ERR("SPI device not ready");
+        return -ENODEV;
+    }
+    
+    spi_cfg.frequency = 4000000;  // 4 MHz
+    spi_cfg.operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_OP_MODE_MASTER;
+    spi_cfg.slave = 0;
+    spi_cfg.cs = (struct spi_cs_control) {
+        .gpio = {0},  // No auto CS
+        .delay = 0,
+    };
+    
+    /* GPIO Init */
+    dc_gpio.port = DEVICE_DT_GET(DC_NODE);
+    dc_gpio.pin = DC_PIN;
+    dc_gpio.dt_flags = GPIO_ACTIVE_HIGH;
+    
+    reset_gpio.port = DEVICE_DT_GET(RESET_NODE);
+    reset_gpio.pin = RESET_PIN;
+    reset_gpio.dt_flags = GPIO_ACTIVE_HIGH;
+    
+    busy_gpio.port = DEVICE_DT_GET(BUSY_NODE);
+    busy_gpio.pin = BUSY_PIN;
+    busy_gpio.dt_flags = GPIO_ACTIVE_HIGH;
+    
+    cs_gpio.port = DEVICE_DT_GET(CS_NODE);
+    cs_gpio.pin = CS_PIN;
+    cs_gpio.dt_flags = GPIO_ACTIVE_LOW;
+    
+    if (!device_is_ready(dc_gpio.port)) {
+        LOG_ERR("GPIO not ready");
+        return -ENODEV;
+    }
+    
+    ret = gpio_pin_configure_dt(&dc_gpio, GPIO_OUTPUT_INACTIVE);
+    ret |= gpio_pin_configure_dt(&reset_gpio, GPIO_OUTPUT_ACTIVE);
+    ret |= gpio_pin_configure_dt(&busy_gpio, GPIO_INPUT);
+    ret |= gpio_pin_configure_dt(&cs_gpio, GPIO_OUTPUT_INACTIVE);
+    
+    if (ret < 0) {
+        LOG_ERR("Failed to configure GPIO: %d", ret);
+        return ret;
+    }
+    
+    LOG_INF("GPIO configured");
+    
+    /* Initialize Display */
+    ret = jd79661_init();
+    if (ret < 0) {
+        LOG_ERR("Failed to init display");
+        return ret;
+    }
+    
+    /* Fill buffer with yellow (0xAA = 10101010 = yellow) */
+    memset(frame_buffer, 0xAA, BUFFER_SIZE);
+    
+    while (1) {
+        gpio_pin_toggle_dt(&led);
+        
+        LOG_INF("Updating display with yellow...");
+        jd79661_display_frame(frame_buffer, sizeof(frame_buffer));
+        
+        k_sleep(K_SECONDS(30));
+    }
+    
+    return 0;
 }
