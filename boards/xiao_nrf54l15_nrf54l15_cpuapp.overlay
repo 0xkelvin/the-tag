@@ -40,11 +40,11 @@
 		e_paper: ssd16xx@0 {
 			compatible = "solomon,ssd1681";
 			reg = <0>;
-			mipi-max-frequency = <8000000>;
+			mipi-max-frequency = <4000000>;
 
-			busy-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>; /* D5 -> P1.11 */
-			width = <200>;
-			height = <200>;
+			busy-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>; /* D5 -> P1.11 */
+			width = <152>;
+			height = <152>;
 			rotation = <0>;
 		};
 	};
