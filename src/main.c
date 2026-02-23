@@ -10,6 +10,9 @@
 #include <zephyr/logging/log.h>
 #include <string.h>
 
+// Include converted image
+#include "image_boaviet.h"
+
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* Display Resolution */
@@ -278,16 +281,19 @@ int main(void)
         return ret;
     }
     
-    /* Fill buffer with yellow (0xAA = 10101010 = yellow) */
-    memset(frame_buffer, 0xAA, BUFFER_SIZE);
+    /* Display image */
+    LOG_INF("Loading image (5776 bytes)...");
+    memcpy(frame_buffer, image_image_boaviet, BUFFER_SIZE);
     
+    LOG_INF("Displaying image...");
+    jd79661_display_frame(frame_buffer, sizeof(frame_buffer));
+    
+    LOG_INF("Image displayed! Done.");
+    
+    // Just blink LED, don't update display anymore
     while (1) {
         gpio_pin_toggle_dt(&led);
-        
-        LOG_INF("Updating display with yellow...");
-        jd79661_display_frame(frame_buffer, sizeof(frame_buffer));
-        
-        k_sleep(K_SECONDS(30));
+        k_sleep(K_SECONDS(1));
     }
     
     return 0;
