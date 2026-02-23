@@ -50,11 +50,12 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
+
 		e_paper: ssd16xx@0 {
 			compatible = "solomon,ssd1681";
 			reg = <0>;
 			mipi-max-frequency = <8000000>;
-		mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
+			mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
 
 			busy-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>; /* D5 -> P1.11 */
 			width = <200>;
