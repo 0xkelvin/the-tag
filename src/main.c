@@ -234,7 +234,7 @@ int main(void)
 
     printk("Bluetooth initialized\n");
 
-    ret = bt_le_adv_start("BT_DEVICE_NAME", ad, ARRAY_SIZE(ad), NULL, 0);
+    ret = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), NULL, 0);
     if (ret) {
         printk("Advertising failed to start (ret %d)\n", ret);
         return 0;
