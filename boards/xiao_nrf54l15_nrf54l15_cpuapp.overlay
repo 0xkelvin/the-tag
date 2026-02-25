@@ -29,6 +29,19 @@
 		zephyr,display = &e_paper;
 	};
 
+	leds {
+		compatible = "gpio-leds";
+
+		led0: led_0 {
+			gpios = <&gpio2 0 GPIO_ACTIVE_LOW>;
+			label = "LED 0";
+		};
+	};
+
+	aliases {
+		led0 = &led0;
+	};
+
 	mipi_dbi_epaper: mipi-dbi-epaper {
 		compatible = "zephyr,mipi-dbi-spi";
 		spi-dev = <&spi00>;
@@ -37,14 +50,16 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
+
 		e_paper: ssd16xx@0 {
 			compatible = "solomon,ssd1681";
 			reg = <0>;
-			mipi-max-frequency = <8000000>;
+			mipi-max-frequency = <4000000>;
+			mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
 
-			busy-gpios = <&gpio1 11 GPIO_ACTIVE_HIGH>; /* D5 -> P1.11 */
-			width = <200>;
-			height = <200>;
+			busy-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>; /* D5 -> P1.11 */
+			width = <152>;
+			height = <152>;
 			rotation = <0>;
 		};
 	};

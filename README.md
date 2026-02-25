@@ -16,3 +16,14 @@
 
 # Share Folder 
 - [Google Driver project folder](https://drive.google.com/drive/folders/1gwg72AfddP2lZDSd2DLhJ3Zl0bu9NLsG?usp=drive_link)
+
+
+```
+cd ~/the-tag
+export ZEPHYR_BASE=$HOME/zephyrproject/zephyr
+west build -b xiao_nrf54l15/nrf54l15/cpuapp -p always
+west flash
+
+
+west build -b nrf54l15dk/nrf54l15/cpuapp -p always
+```
