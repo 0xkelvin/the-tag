@@ -57,3 +57,23 @@ After a successful build: Make sure your board is connected.
 west flash
 ```
 
+---
+
+## 🚀 Roadmap
+
+### 🔧 Core Features
+- [x] West workspace initialization
+- [x] MCUboot integration
+
+### 📡 Connectivity
+- [ ] BLE connection stability improvements
+
+### 🔋 Power Management
+- [ ] Sleep mode optimization
+- [ ] Low battery protection
+- [ ] Power consumption measurement report
+
+### 🧪 Testing
+- [ ] Hardware validation
+- [ ] Field testing
+- [ ] CI pipeline setup
