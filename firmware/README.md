@@ -61,6 +61,81 @@ west flash
 
 ---
 
+## 📲 BLE Image Transfer Protocol
+
+The firmware exposes a custom BLE GATT service that allows a mobile app to send images to the e-ink display over Bluetooth Low Energy.
+
+### Service & Characteristics
+
+| Name | UUID | Properties |
+|------|------|------------|
+| Image Service | `12345678-1234-5678-1234-56789abcdef0` | — |
+| Data Characteristic | `12345678-1234-5678-1234-56789abcdef1` | Write Without Response |
+| Control Characteristic | `12345678-1234-5678-1234-56789abcdef2` | Write, Notify |
+
+### Image Format
+
+- Resolution: **152 x 152** pixels
+- Color depth: **2 bits per pixel** (4 colors: black, white, red, yellow)
+- Buffer size: **5776 bytes** (`152 * 152 / 4`)
+- Pixel packing: 4 pixels per byte, MSB first — `[px0(2bit) px1(2bit) px2(2bit) px3(2bit)]`
+- Color codes: `00` = black, `01` = white, `10` = yellow, `11` = red
+
+### Control Commands (Phone → Firmware)
+
+| Command | Bytes | Description |
+|---------|-------|-------------|
+| START | `0x01, size_lo, size_hi` | Begin transfer. Firmware resets buffer and expects `size` bytes. |
+| COMMIT | `0x02` | Finalize transfer. Firmware validates and displays image. |
+| CANCEL | `0x03` | Abort current transfer. |
+
+### Status Notifications (Firmware → Phone)
+
+| Status | Bytes | Description |
+|--------|-------|-------------|
+| READY | `0x00` | Firmware ready to receive data chunks. |
+| PROGRESS | `0x01, received_lo, received_hi` | Bytes received so far (sent every ~1KB). |
+| DISPLAYING | `0x10` | Transfer complete, e-ink refresh started. |
+| DONE | `0x11` | E-ink refresh complete. |
+| ERROR | `0xFF, error_code` | Transfer error occurred. |
+
+### Error Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| `0x01` | INVALID_SIZE | Requested size exceeds 5776 bytes |
+| `0x02` | OVERFLOW | Data received exceeds expected size |
+| `0x03` | NOT_STARTED | Data/commit received without a START |
+| `0x04` | INCOMPLETE | COMMIT received before all bytes arrived |
+
+### Transfer Sequence
+
+```
+Phone                              Firmware
+  |                                    |
+  |--- WRITE ctrl [0x01, lo, hi] ----->|  START (size = 5776)
+  |<--- NOTIFY ctrl [0x00] -----------|  READY
+  |                                    |
+  |--- WRITE data [chunk 1] --------->|  (write-without-response)
+  |--- WRITE data [chunk 2] --------->|
+  |<--- NOTIFY ctrl [0x01, lo, hi] ---|  PROGRESS
+  |--- WRITE data [chunk N] --------->|
+  |                                    |
+  |--- WRITE ctrl [0x02] ------------>|  COMMIT
+  |<--- NOTIFY ctrl [0x10] -----------|  DISPLAYING
+  |        (e-ink refresh ~3-5s)       |
+  |<--- NOTIFY ctrl [0x11] -----------|  DONE
+```
+
+### Notes
+
+- Negotiate MTU to **247** for optimal throughput (~244 bytes per data chunk).
+- Data chunks are written sequentially; the firmware tracks the offset internally.
+- The mobile app performs image conversion (resize, dithering, 4-color quantization) before sending.
+- A Flutter companion app is available in the `mobile_app/` directory.
+
+---
+
 ## 🚀 Roadmap
 
 ### 🔧 Core Features

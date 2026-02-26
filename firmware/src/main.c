@@ -13,16 +13,14 @@
 #include <zephyr/bluetooth/hci.h>
 
 #include "ble_backend.h"
-
-// Include converted image
+#include "ble_image_service.h"
 #include "image_boaviet.h"
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
-/* Display Resolution */
 #define EPD_WIDTH 152
 #define EPD_HEIGHT 152
-#define BUFFER_SIZE (EPD_WIDTH * EPD_HEIGHT / 4)  // 5776 bytes
+#define BUFFER_SIZE (EPD_WIDTH * EPD_HEIGHT / 4)
 
 /* GPIO pins */
 #define DC_NODE    DT_NODELABEL(gpio1)
@@ -48,6 +46,17 @@ static const struct device *spi_dev;
 static struct spi_config spi_cfg;
 
 static uint8_t frame_buffer[BUFFER_SIZE];
+
+static K_SEM_DEFINE(image_ready_sem, 0, 1);
+static const uint8_t *pending_image_data;
+static uint16_t pending_image_size;
+
+static void on_ble_image_ready(const uint8_t *data, uint16_t size)
+{
+    pending_image_data = data;
+    pending_image_size = size;
+    k_sem_give(&image_ready_sem);
+}
 
 /* Helper functions */
 static void jd79661_write_cmd(uint8_t cmd)
@@ -220,9 +229,10 @@ int main(void)
 {
     int ret;
     
-    LOG_INF("=== The-Tag Test Firmware ===");
+    LOG_INF("=== The-Tag Firmware ===");
     
     ble_backend_init();
+    ble_image_service_init(on_ble_image_ready);
 
     /* LED Init */
     if (!gpio_is_ready_dt(&led)) {
@@ -287,20 +297,22 @@ int main(void)
         return ret;
     }
     
-    /* Display image */
-    LOG_INF("Loading image (5776 bytes)...");
+    /* Display default image on boot */
+    LOG_INF("Loading default image (%u bytes)...", BUFFER_SIZE);
     memcpy(frame_buffer, image_image_boaviet, BUFFER_SIZE);
-    
-    LOG_INF("Displaying image...");
     jd79661_display_frame(frame_buffer, sizeof(frame_buffer));
-    
-    LOG_INF("Image displayed! Done.");
-    
-    // Just blink LED, don't update display anymore
+    LOG_INF("Default image displayed. Waiting for BLE images...");
+
     while (1) {
+        if (k_sem_take(&image_ready_sem, K_MSEC(500)) == 0) {
+            LOG_INF("BLE image received (%u bytes), updating display...", pending_image_size);
+            memcpy(frame_buffer, pending_image_data, pending_image_size);
+            jd79661_display_frame(frame_buffer, sizeof(frame_buffer));
+            ble_image_notify_display_done();
+            LOG_INF("BLE image displayed successfully");
+        }
         gpio_pin_toggle_dt(&led);
-        k_sleep(K_SECONDS(1));
     }
-    
+
     return 0;
 }
