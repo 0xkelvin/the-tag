@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -46,6 +45,7 @@ class _HomePageState extends State<HomePage> {
   final BleImageTransfer _ble = BleImageTransfer();
   final ImagePicker _picker = ImagePicker();
   final List<String> _logs = [];
+  final ScrollController _logScrollController = ScrollController();
 
   TransferState _bleState = TransferState.idle;
   double _progress = 0;
@@ -65,7 +65,7 @@ class _HomePageState extends State<HomePage> {
     _ble.logStream.listen((msg) {
       setState(() {
         _logs.add(msg);
-        if (_logs.length > 100) _logs.removeAt(0);
+        if (_logs.length > 500) _logs.removeAt(0);
       });
     });
   }
@@ -73,7 +73,16 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _ble.dispose();
+    _logScrollController.dispose();
     super.dispose();
+  }
+
+  String _ts() {
+    final now = DateTime.now();
+    return '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}:'
+        '${now.second.toString().padLeft(2, '0')}.'
+        '${now.millisecond.toString().padLeft(3, '0')}';
   }
 
   Future<void> _startScan() async {
@@ -81,29 +90,38 @@ class _HomePageState extends State<HomePage> {
       _scanning = true;
       _scanResults = [];
     });
+    _addLog('[APP] Scan requested by user');
     try {
       final results = await _ble.scan();
       setState(() => _scanResults = results);
+      _addLog('[APP] Scan results: ${results.length} device(s)');
     } catch (e) {
-      _addLog('Scan error: $e');
+      _addLog('[APP] Scan error: $e');
     } finally {
       setState(() => _scanning = false);
     }
   }
 
   Future<void> _connectDevice(BluetoothDevice device) async {
+    _addLog('[APP] User selected device: "${device.platformName}" (${device.remoteId})');
     try {
       await _ble.connect(device);
     } catch (e) {
-      _addLog('Connect error: $e');
+      _addLog('[APP] Connect error: $e');
     }
   }
 
   Future<void> _pickImage() async {
+    _addLog('[APP] Opening gallery picker...');
     final xfile = await _picker.pickImage(source: ImageSource.gallery);
-    if (xfile == null) return;
+    if (xfile == null) {
+      _addLog('[APP] Gallery picker cancelled');
+      return;
+    }
 
+    _addLog('[APP] Image selected: ${xfile.name}');
     final bytes = await xfile.readAsBytes();
+    _addLog('[APP] Image loaded: ${bytes.length} bytes');
     setState(() {
       _originalImageBytes = bytes;
       _previewImage = null;
@@ -114,10 +132,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _takePhoto() async {
+    _addLog('[APP] Opening camera...');
     final xfile = await _picker.pickImage(source: ImageSource.camera);
-    if (xfile == null) return;
+    if (xfile == null) {
+      _addLog('[APP] Camera cancelled');
+      return;
+    }
 
+    _addLog('[APP] Photo taken: ${xfile.name}');
     final bytes = await xfile.readAsBytes();
+    _addLog('[APP] Photo loaded: ${bytes.length} bytes');
     setState(() {
       _originalImageBytes = bytes;
       _previewImage = null;
@@ -129,39 +153,61 @@ class _HomePageState extends State<HomePage> {
 
   void _convertImage(Uint8List bytes) {
     setState(() => _converting = true);
-    _addLog('Converting image...');
+    _addLog('[CONV] Starting conversion (input: ${bytes.length} bytes)');
+    _addLog('[CONV] Target: ${epdWidth}x$epdHeight, 4-color, 2bpp');
 
-    // Run in microtask to allow UI to update
+    final sw = Stopwatch()..start();
     Future.microtask(() {
       try {
         final result = convertImageForEpd(bytes);
+        final elapsed = sw.elapsedMilliseconds;
         setState(() {
           _previewImage = result.preview;
           _convertedBuffer = result.buffer;
           _converting = false;
         });
-        _addLog(
-            'Conversion complete: ${result.buffer.length} bytes');
-      } catch (e) {
+        _addLog('[CONV] Done in ${elapsed}ms -> ${result.buffer.length} bytes');
+        _addLog('[CONV] First 8 bytes: ${result.buffer.take(8).map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ')}');
+      } catch (e, st) {
         setState(() => _converting = false);
-        _addLog('Conversion error: $e');
+        _addLog('[CONV] ERROR: $e');
+        _addLog('[CONV] Stack: ${st.toString().split('\n').take(3).join(' | ')}');
       }
     });
   }
 
   Future<void> _sendImage() async {
-    if (_convertedBuffer == null) return;
+    if (_convertedBuffer == null) {
+      _addLog('[APP] Send requested but no converted image');
+      return;
+    }
+    _addLog('[APP] Send requested: ${_convertedBuffer!.length} bytes');
     try {
       await _ble.sendImage(_convertedBuffer!);
     } catch (e) {
-      _addLog('Send error: $e');
+      _addLog('[APP] Send error: $e');
     }
+  }
+
+  void _copyLogs() {
+    final text = _logs.join('\n');
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Copied ${_logs.length} log lines to clipboard'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _clearLogs() {
+    setState(() => _logs.clear());
   }
 
   void _addLog(String msg) {
     setState(() {
-      _logs.add(msg);
-      if (_logs.length > 100) _logs.removeAt(0);
+      _logs.add('${_ts()} $msg');
+      if (_logs.length > 500) _logs.removeAt(0);
     });
   }
 
@@ -395,29 +441,50 @@ class _HomePageState extends State<HomePage> {
 
             // --- Log ---
             _SectionCard(
-              title: 'Log',
+              title: 'Log (${_logs.length})',
               icon: Icons.terminal,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.copy, size: 18),
+                    tooltip: 'Copy all logs',
+                    onPressed: _logs.isEmpty ? null : _copyLogs,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    tooltip: 'Clear logs',
+                    onPressed: _logs.isEmpty ? null : _clearLogs,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
               children: [
                 Container(
-                  height: 160,
+                  height: 220,
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(8),
-                    reverse: true,
-                    itemCount: _logs.length,
-                    itemBuilder: (_, i) {
-                      final idx = _logs.length - 1 - i;
-                      return Text(
-                        _logs[idx],
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                        ),
-                      );
-                    },
+                  child: SelectionArea(
+                    child: ListView.builder(
+                      controller: _logScrollController,
+                      padding: const EdgeInsets.all(8),
+                      reverse: true,
+                      itemCount: _logs.length,
+                      itemBuilder: (_, i) {
+                        final idx = _logs.length - 1 - i;
+                        return Text(
+                          _logs[idx],
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                            fontSize: 10,
+                            height: 1.4,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ],
