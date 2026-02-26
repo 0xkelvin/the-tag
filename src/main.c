@@ -12,11 +12,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/hci.h>
 
-static const struct bt_data ad[] = {
-    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME,
-            sizeof(CONFIG_BT_DEVICE_NAME) - 1),
-};
+#include "ble_backend.h"
 
 // Include converted image
 #include "image_boaviet.h"
@@ -224,23 +220,9 @@ int main(void)
 {
     int ret;
     
-    LOG_INF("=== JD79661 E-Paper Test ===");
+    LOG_INF("=== The-Tag Test Firmware ===");
     
-    ret = bt_enable(NULL);
-    if (ret) {
-        printk("Bluetooth init failed (ret %d)\n", ret);
-        return 0;
-    }
-
-    printk("Bluetooth initialized\n");
-
-    ret = bt_le_adv_start(BT_LE_ADV_CONN_FAST_2, ad, ARRAY_SIZE(ad), NULL, 0);
-    if (ret) {
-        printk("Advertising failed to start (ret %d)\n", ret);
-        return 0;
-    }
-
-    printk("Advertising started\n");
+    ble_backend_init();
 
     /* LED Init */
     if (!gpio_is_ready_dt(&led)) {
