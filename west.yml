@@ -1,0 +1,38 @@
+manifest:
+  version: "1.0"
+  defaults:
+    remote: the-tag
+    revision: main
+
+  self:
+    path: the-tag
+    west-commands: scritps/west-commands.yml
+
+  remotes:
+    - name: the-tag
+      url-base: https://github.com/bluleap-ai/the-tag
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_nordic
+          - nrfx
+          - mbedtls
+          - tinycrypt
+          - picolibc
+          - mcumgr
+          - zcbor
+          - segger
+          - stream_flash
+
+    - name: mcuboot_blueleap
+      path: bootloader/mcuboot
+      url: git@github.com:bluleap-ai/mcuboot-etag.git
+      revision: main

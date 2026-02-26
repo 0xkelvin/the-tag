@@ -16,3 +16,64 @@
 
 # Share Folder 
 - [Google Driver project folder](https://drive.google.com/drive/folders/1gwg72AfddP2lZDSd2DLhJ3Zl0bu9NLsG?usp=drive_link)
+
+# 🚀 Getting Started
+
+This project uses **West** (Zephyr’s meta-tool) to manage the workspace and modules.
+
+Follow the steps below to initialize, build, and flash the firmware.
+
+---
+
+## 📦 1️⃣ Initialize the Workspace
+
+Initialize the workspace directly from this repository:
+
+```bash
+west init -m git@github.com:bluleap-ai/the-tag.git --mr main etag
+cd etag
+west update
+```
+
+## 🛠️ 2️⃣ Build the Firmware
+
+### Build for Seeed XIAO nRF54L15 (CPUAPP core) debug mode:
+
+```bash
+west build -b xiao_nrf54l15/nrf54l15/cpuapp the-tag -p
+```
+
+### Or Build for Seeed XIAO nRF54L15 (CPUAPP core) using sysbuild:
+
+```bash
+west build -b xiao_nrf54l15/nrf54l15/cpuapp the-tag --sysbuild -p
+```
+
+## 🔥 3️⃣ Flash the Device
+
+After a successful build: Make sure your board is connected.
+
+```bash
+west flash
+```
+
+---
+
+## 🚀 Roadmap
+
+### 🔧 Core Features
+- [x] West workspace initialization
+- [x] MCUboot integration
+
+### 📡 Connectivity
+- [ ] BLE connection stability improvements
+
+### 🔋 Power Management
+- [ ] Sleep mode optimization
+- [ ] Low battery protection
+- [ ] Power consumption measurement report
+
+### 🧪 Testing
+- [ ] Hardware validation
+- [ ] Field testing
+- [ ] CI pipeline setup
