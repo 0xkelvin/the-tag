@@ -34,5 +34,5 @@ manifest:
 
     - name: mcuboot_blueleap
       path: bootloader/mcuboot
-      url: https://github.com/zephyrproject-rtos/mcuboot
+      url: git@github.com:bluleap-ai/mcuboot-etag.git
       revision: main
