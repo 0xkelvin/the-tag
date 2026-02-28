@@ -2,14 +2,15 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/logging/log_backend_ble.h>
 #include <zephyr/settings/settings.h>
+
+#include "ble_image_service.h"
 
 LOG_MODULE_REGISTER(ble_backend);
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, LOGGER_BACKEND_BLE_ADV_UUID_DATA)
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BLE_IMAGE_SERVICE_UUID),
 };
 
 static const struct bt_data sd[] = {
