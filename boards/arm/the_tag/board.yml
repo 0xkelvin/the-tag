@@ -1,6 +1,0 @@
-board:
-  name: the_tag
-  full_name: The Tag
-  vendor: custom
-  socs:
-    - name: nrf54l15
