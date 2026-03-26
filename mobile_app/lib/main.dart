@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'audio_tab.dart';
 import 'services/ble_image_transfer.dart';
 import 'services/image_converter.dart';
+import 'models/device_type.dart';
 
 void main() {
   runApp(const VeeaTagApp());
@@ -92,10 +95,20 @@ class _TabShellState extends State<_TabShell> {
   Uint8List? _convertedBuffer;
   bool _converting = false;
 
+  // Received images from camera
+  final List<Uint8List> _receivedImages = [];
+  StreamSubscription? _omiImageSub;
+
   @override
   void initState() {
     super.initState();
-    _ble.stateStream.listen((s) => setState(() => _bleState = s));
+    _ble.stateStream.listen((s) {
+      setState(() => _bleState = s);
+      // Subscribe to omiGlass image stream when connected to camera device
+      if (s == TransferState.connected && _ble.deviceType == DeviceType.camera) {
+        _subscribeToOmiImages();
+      }
+    });
     _ble.progressStream.listen((p) => setState(() => _progress = p));
     _ble.logStream.listen((msg) {
       setState(() {
@@ -105,8 +118,25 @@ class _TabShellState extends State<_TabShell> {
     });
   }
 
+  void _subscribeToOmiImages() {
+    _omiImageSub?.cancel();
+    final stream = _ble.omiImageStream;
+    if (stream != null) {
+      _omiImageSub = stream.listen((imageData) {
+        setState(() {
+          _receivedImages.insert(0, imageData); // Add to front (newest first)
+          if (_receivedImages.length > 50) {
+            _receivedImages.removeLast(); // Keep max 50 images
+          }
+        });
+        _addLog('[APP] Received image from camera: ${imageData.length} bytes');
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _omiImageSub?.cancel();
     _ble.dispose();
     _logScrollController.dispose();
     super.dispose();
@@ -120,7 +150,62 @@ class _TabShellState extends State<_TabShell> {
         '${now.millisecond.toString().padLeft(3, '0')}';
   }
 
+  Future<bool> _requestBlePermissions() async {
+    // Android 12+ (API 31+) requires runtime grants for BLE + location
+    final statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+
+    final denied = statuses.entries
+        .where((e) => !e.value.isGranted)
+        .map((e) => e.key.toString())
+        .toList();
+
+    if (denied.isNotEmpty) {
+      _addLog('[APP] Permission denied: ${denied.join(', ')}');
+
+      // If permanently denied, guide user to settings
+      final permanent = statuses.entries
+          .where((e) => e.value.isPermanentlyDenied)
+          .toList();
+      if (permanent.isNotEmpty && mounted) {
+        await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Bluetooth Permission Required'),
+            content: const Text(
+              'Bluetooth and Location permissions are permanently denied.\n\n'
+              'Please enable them in App Settings → Permissions.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  openAppSettings();
+                },
+                child: const Text('Open Settings'),
+              ),
+            ],
+          ),
+        );
+      }
+      return false;
+    }
+
+    _addLog('[APP] All BLE permissions granted');
+    return true;
+  }
+
   Future<void> _startScan() async {
+    // Always check/request permissions first
+    if (!await _requestBlePermissions()) return;
+
     setState(() {
       _scanning = true;
       _scanResults = [];
@@ -184,6 +269,96 @@ class _TabShellState extends State<_TabShell> {
     });
 
     _convertImage(bytes);
+  }
+
+  void _selectReceivedImage(Uint8List imageBytes) {
+    _addLog('[APP] Selected received image: ${imageBytes.length} bytes');
+    setState(() {
+      _originalImageBytes = imageBytes;
+      _previewImage = null;
+      _convertedBuffer = null;
+    });
+    _convertImage(imageBytes);
+  }
+
+  Future<void> _showReceivedImagesGallery() async {
+    if (_receivedImages.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No images received yet. Connect to camera device to receive images.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.photo_library),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Received Images (${_receivedImages.length})',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: GridView.builder(
+                  padding: const EdgeInsets.all(16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  itemCount: _receivedImages.length,
+                  itemBuilder: (context, index) {
+                    final imageBytes = _receivedImages[index];
+                    return InkWell(
+                      onTap: () {
+                        Navigator.pop(context);
+                        _selectReceivedImage(imageBytes);
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            imageBytes,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _convertImage(Uint8List bytes) {
@@ -370,12 +545,24 @@ class _TabShellState extends State<_TabShell> {
                     label: const Text('Gallery'),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton.tonalIcon(
                     onPressed: _takePhoto,
                     icon: const Icon(Icons.camera_alt),
                     label: const Text('Camera'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: _showReceivedImagesGallery,
+                    icon: Badge(
+                      label: Text('${_receivedImages.length}'),
+                      isLabelVisible: _receivedImages.isNotEmpty,
+                      child: const Icon(Icons.camera_enhance),
+                    ),
+                    label: const Text('Received'),
                   ),
                 ),
               ],
@@ -565,8 +752,8 @@ class _TabShellState extends State<_TabShell> {
     };
     return Chip(
       label: Text(label, style: const TextStyle(fontSize: 11)),
-      backgroundColor: color.withValues(alpha: 0.15),
-      side: BorderSide(color: color.withValues(alpha: 0.3)),
+      backgroundColor: color.withAlpha(38),
+      side: BorderSide(color: color.withAlpha(76)),
       padding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
     );
@@ -594,7 +781,7 @@ class _SectionCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+            color: theme.colorScheme.outlineVariant.withAlpha(128)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -607,7 +794,7 @@ class _SectionCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(title, style: theme.textTheme.titleSmall),
                 const Spacer(),
-                ?trailing,
+                if (trailing != null) trailing!,
               ],
             ),
             const SizedBox(height: 12),
