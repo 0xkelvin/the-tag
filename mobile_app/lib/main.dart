@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'audio_tab.dart';
 import 'services/ble_image_transfer.dart';
@@ -311,6 +313,15 @@ class _TabShellState extends State<_TabShell> {
                     ),
                     const Spacer(),
                     IconButton(
+                      icon: const Icon(Icons.download),
+                      tooltip: 'Save all images',
+                      onPressed: () async {
+                        for (int i = 0; i < _receivedImages.length; i++) {
+                          await _saveImageToDownloads(_receivedImages[i], i);
+                        }
+                      },
+                    ),
+                    IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(context),
                     ),
@@ -334,6 +345,7 @@ class _TabShellState extends State<_TabShell> {
                         Navigator.pop(context);
                         _selectReceivedImage(imageBytes);
                       },
+                      onLongPress: () => _saveImageToDownloads(imageBytes, index),
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
                         decoration: BoxDecoration(
@@ -342,12 +354,37 @@ class _TabShellState extends State<_TabShell> {
                             color: Theme.of(context).colorScheme.outline,
                           ),
                         ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.memory(
-                            imageBytes,
-                            fit: BoxFit.cover,
-                          ),
+                        child: Stack(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.memory(
+                                imageBytes,
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: double.infinity,
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 4,
+                              right: 4,
+                              child: GestureDetector(
+                                onTap: () => _saveImageToDownloads(imageBytes, index),
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black54,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Icon(
+                                    Icons.download,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -412,6 +449,58 @@ class _TabShellState extends State<_TabShell> {
 
   void _clearLogs() {
     setState(() => _logs.clear());
+  }
+
+  Future<void> _saveImageToDownloads(Uint8List imageBytes, int index) async {
+    try {
+      // Request storage permission on Android
+      if (Platform.isAndroid) {
+        final status = await Permission.storage.request();
+        if (!status.isGranted) {
+          // Android 13+ doesn't need storage permission for app-specific dirs
+          // Try anyway with getExternalStorageDirectory
+        }
+      }
+
+      // Save to app's external storage (visible in Files app)
+      Directory? dir;
+      if (Platform.isAndroid) {
+        dir = await getExternalStorageDirectory();
+        // Navigate to Downloads
+        final downloads = Directory('${dir?.parent.parent.parent.parent.path}/Download');
+        if (await downloads.exists()) {
+          dir = downloads;
+        }
+      } else {
+        dir = await getApplicationDocumentsDirectory();
+      }
+
+      if (dir == null) {
+        _addLog('[APP] Cannot find storage directory');
+        return;
+      }
+
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final file = File('${dir.path}/veea_img_$ts.png');
+      await file.writeAsBytes(imageBytes);
+
+      _addLog('[APP] Saved image to ${file.path}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved to ${file.path.split('/').last}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      _addLog('[APP] Save error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e')),
+        );
+      }
+    }
   }
 
   void _addLog(String msg) {
